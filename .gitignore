@@ -1,0 +1,32 @@
+# Google Apps Script
+.clasp.json
+.claspignore
+
+# Node modules
+node_modules/
+package-lock.json
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Archivos temporales
+tmp/
+temp/
+*.tmp
+
+# Archivos de configuración local (con credenciales)
+config.local.gs
+
+# Archivos de respaldo
+*.bak
