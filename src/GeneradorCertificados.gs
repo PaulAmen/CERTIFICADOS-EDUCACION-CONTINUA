@@ -16,8 +16,11 @@ function generarTodosCertificados() {
   
   try {
     var config = obtenerConfiguracion();
-    var hoja = SpreadsheetApp.getActiveSheet();
-    var ui = SpreadsheetApp.getUi();
+    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    var hoja = spreadsheet.getActiveSheet();
+    
+    // Determinar si estamos en un trigger automático o ejecución manual
+    var esTriggerAutomatico = esEjecucionDesdeTrigger();
     
     // Asegurar que existe la columna de LINK
     verificarColumnaLink(hoja);
@@ -26,7 +29,10 @@ function generarTodosCertificados() {
     var ultimaFila = hoja.getLastRow();
     
     if (ultimaFila < 2) {
-      ui.alert('No hay datos', 'No se encontraron registros para procesar.', ui.ButtonSet.OK);
+      if (!esTriggerAutomatico) {
+        SpreadsheetApp.getUi().alert('No hay datos', 'No se encontraron registros para procesar.', SpreadsheetApp.getUi().ButtonSet.OK);
+      }
+      Logger.log('No hay datos para procesar');
       return;
     }
     
@@ -34,19 +40,23 @@ function generarTodosCertificados() {
     var errores = [];
     var procesoContinuado = false;
     
-    // Mostrar mensaje de inicio
-    SpreadsheetApp.getActiveSpreadsheet().toast(
-      'Procesando certificados...',
-      'Generando Certificados',
-      -1
-    );
+    // Mostrar mensaje de inicio (solo funciona en ejecución manual)
+    if (!esTriggerAutomatico) {
+      spreadsheet.toast(
+        'Procesando certificados...',
+        'Generando Certificados',
+        -1
+      );
+    }
+    Logger.log('Iniciando generación de certificados. Total de filas: ' + ultimaFila);
     
     // Procesar cada fila
     for (var i = 2; i <= ultimaFila; i++) {
       // Verificar tiempo de ejecución
       var currentTime = new Date().getTime();
       if (currentTime - startTime > MAX_EXECUTION_TIME) {
-        Logger.log('Tiempo límite alcanzado. Programando continuación...');
+        Logger.log('Tiempo límite alcanzado en ' + ((currentTime - startTime) / 1000) + ' segundos');
+        Logger.log('Programando continuación...');
         programarContinuacion();
         procesoContinuado = true;
         break;
@@ -57,7 +67,7 @@ function generarTodosCertificados() {
       var linkExistente = hoja.getRange(i, 3).getValue();
       
       // Saltar si ya tiene link (ya se procesó)
-      if (linkExistente && linkExistente.toString().trim() !== '') {
+      if (linkExistente && linkExistente.toString().trim() !== '' && !linkExistente.toString().startsWith('ERROR')) {
         Logger.log('Fila ' + i + ': Ya procesada, saltando');
         continue;
       }
@@ -72,13 +82,16 @@ function generarTodosCertificados() {
         var resultado = generarCertificado(nombre, correo, config, i, hoja);
         totalProcesados++;
         
-        // Actualizar progreso cada 5 certificados
+        // Actualizar progreso cada 5 certificados (solo en ejecución manual)
         if (totalProcesados % 5 === 0) {
-          SpreadsheetApp.getActiveSpreadsheet().toast(
-            'Procesados ' + totalProcesados + ' certificados',
-            'Progreso',
-            3
-          );
+          Logger.log('Progreso: ' + totalProcesados + ' certificados procesados');
+          if (!esTriggerAutomatico) {
+            spreadsheet.toast(
+              'Procesados ' + totalProcesados + ' certificados',
+              'Progreso',
+              3
+            );
+          }
         }
         
       } catch (error) {
@@ -89,11 +102,20 @@ function generarTodosCertificados() {
       }
     }
     
-    // Ocultar mensaje de progreso
-    SpreadsheetApp.getActiveSpreadsheet().toast('', '', 1);
+    // Ocultar mensaje de progreso (solo en ejecución manual)
+    if (!esTriggerAutomatico) {
+      spreadsheet.toast('', '', 1);
+    }
     
-    // Mostrar resultado final solo si no se continuará automáticamente
-    if (!procesoContinuado) {
+    // Log del resultado
+    Logger.log('Proceso finalizado. Certificados procesados: ' + totalProcesados);
+    if (errores.length > 0) {
+      Logger.log('Errores encontrados: ' + errores.length);
+      errores.forEach(function(e) { Logger.log('  - ' + e); });
+    }
+    
+    // Mostrar resultado final solo si no se continuará automáticamente Y no es trigger
+    if (!procesoContinuado && !esTriggerAutomatico) {
       var mensaje = 'Certificados generados exitosamente: ' + totalProcesados;
       
       if (errores.length > 0) {
@@ -104,19 +126,28 @@ function generarTodosCertificados() {
         }
       }
       
-      ui.alert('Proceso Completado', mensaje, ui.ButtonSet.OK);
-    } else {
+      SpreadsheetApp.getUi().alert('Proceso Completado', mensaje, SpreadsheetApp.getUi().ButtonSet.OK);
+    } else if (procesoContinuado) {
       Logger.log('Proceso pausado. Se procesaron ' + totalProcesados + ' certificados.');
       Logger.log('El proceso continuará automáticamente en 1 minuto.');
     }
     
   } catch (error) {
     Logger.log('Error general: ' + error.message);
-    SpreadsheetApp.getUi().alert(
-      'Error',
-      'Ocurrió un error al generar los certificados:\n' + error.message,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
+    Logger.log('Stack trace: ' + error.stack);
+    
+    // Solo mostrar alert si no es un trigger automático
+    if (!esEjecucionDesdeTrigger()) {
+      try {
+        SpreadsheetApp.getUi().alert(
+          'Error',
+          'Ocurrió un error al generar los certificados:\n' + error.message,
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+      } catch (e) {
+        Logger.log('No se pudo mostrar alert de error: ' + e.message);
+      }
+    }
   }
 }
 
@@ -308,4 +339,21 @@ function limpiarTriggersAutomaticos() {
     'Triggers Limpiados',
     5
   );
+}
+
+/**
+ * Detecta si el script está siendo ejecutado desde un trigger automático
+ * o desde la interfaz de usuario
+ * 
+ * @return {boolean} true si es un trigger, false si es ejecución manual
+ */
+function esEjecucionDesdeTrigger() {
+  try {
+    // Intentar obtener la UI. Si falla, es un trigger
+    SpreadsheetApp.getUi();
+    return false;
+  } catch (e) {
+    // Si no puede obtener UI, está ejecutándose desde un trigger
+    return true;
+  }
 }
