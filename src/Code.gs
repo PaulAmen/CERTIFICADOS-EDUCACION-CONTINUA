@@ -17,6 +17,8 @@ function onOpen() {
     .addItem('Configurar IDs', 'mostrarDialogoConfiguracion')
     .addItem('Ver Configuración Actual', 'mostrarConfiguracionActual')
     .addSeparator()
+    .addItem('Cancelar Ejecuciones Automáticas', 'limpiarTriggersAutomaticos')
+    .addSeparator()
     .addItem('Ayuda', 'mostrarAyuda')
     .addToUi();
 }
@@ -188,10 +190,15 @@ function mostrarAyuda() {
   mensaje += '   (Certificados → Configurar IDs)\n\n';
   mensaje += '2. Asegúrate de que tu hoja tenga estas columnas:\n';
   mensaje += '   - NOMBRE (columna A)\n';
-  mensaje += '   - CORREO (columna B)\n\n';
+  mensaje += '   - CORREO (columna B)\n';
+  mensaje += '   - LINK (columna C) - Se crea automáticamente\n\n';
   mensaje += '3. El template debe contener el placeholder: {{NOMBRE}}\n\n';
   mensaje += '4. Ejecuta: Certificados → Generar Certificados\n\n';
-  mensaje += 'Los PDFs se guardarán con el nombre de cada participante.\n\n';
+  mensaje += 'CARACTERÍSTICAS:\n';
+  mensaje += '- Los PDFs se guardan con el nombre del participante\n';
+  mensaje += '- El link al PDF se guarda en la columna C\n';
+  mensaje += '- Si hay muchos certificados, el proceso continúa automáticamente\n';
+  mensaje += '- Puedes cancelar ejecuciones automáticas desde el menú\n\n';
   mensaje += 'Repositorio: github.com/tu-usuario/CERTIFICADOS-EDUCACION-CONTINUA';
   
   ui.alert('Ayuda', mensaje, ui.ButtonSet.OK);

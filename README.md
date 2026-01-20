@@ -12,6 +12,9 @@ Sistema automatizado para generar certificados en PDF a partir de un template de
 - Procesamiento por lotes de múltiples participantes
 - Indicadores de progreso en tiempo real
 - Manejo robusto de errores
+- **NUEVO:** Columna automática con links directos a certificados
+- **NUEVO:** Continuación automática para procesos largos (>6 min)
+- **NUEVO:** Detección inteligente de certificados ya procesados
 
 ## Requisitos Previos
 
@@ -99,11 +102,13 @@ Para instrucciones detalladas, consulta [INSTALACION.md](docs/INSTALACION.md)
 
 Tu hoja debe tener el siguiente formato:
 
-| NOMBRE          | CORREO                    |
-|-----------------|---------------------------|
-| Juan Pérez      | juan.perez@example.com    |
-| María González  | maria.gonzalez@example.com|
-| Carlos López    | carlos.lopez@example.com  |
+| NOMBRE          | CORREO                    | LINK                      |
+|-----------------|---------------------------|---------------------------|
+| Juan Pérez      | juan.perez@example.com    | (se llena automáticamente)|
+| María González  | maria.gonzalez@example.com| (se llena automáticamente)|
+| Carlos López    | carlos.lopez@example.com  | (se llena automáticamente)|
+
+**Nota:** La columna LINK se crea automáticamente y contiene el enlace directo al certificado generado.
 
 ### Generar Certificados
 

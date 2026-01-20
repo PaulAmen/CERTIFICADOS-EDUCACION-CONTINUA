@@ -8,14 +8,21 @@
 /**
  * Función principal que genera todos los certificados
  * Lee la hoja activa y procesa cada fila
+ * Incluye continuación automática si se acerca al límite de tiempo
  */
 function generarTodosCertificados() {
+  var startTime = new Date().getTime();
+  var MAX_EXECUTION_TIME = 5 * 60 * 1000; // 5 minutos (dejamos margen de 1 min)
+  
   try {
     var config = obtenerConfiguracion();
     var hoja = SpreadsheetApp.getActiveSheet();
     var ui = SpreadsheetApp.getUi();
     
-    // Obtener todos los datos (desde la fila 2, asumiendo que la fila 1 son encabezados)
+    // Asegurar que existe la columna de LINK
+    verificarColumnaLink(hoja);
+    
+    // Obtener todos los datos
     var ultimaFila = hoja.getLastRow();
     
     if (ultimaFila < 2) {
@@ -23,62 +30,85 @@ function generarTodosCertificados() {
       return;
     }
     
-    var datos = hoja.getRange(2, 1, ultimaFila - 1, 2).getValues();
     var totalProcesados = 0;
     var errores = [];
+    var procesoContinuado = false;
     
     // Mostrar mensaje de inicio
     SpreadsheetApp.getActiveSpreadsheet().toast(
-      'Procesando ' + datos.length + ' certificado(s)...',
+      'Procesando certificados...',
       'Generando Certificados',
       -1
     );
     
     // Procesar cada fila
-    for (var i = 0; i < datos.length; i++) {
-      var nombre = datos[i][0];
-      var correo = datos[i][1];
+    for (var i = 2; i <= ultimaFila; i++) {
+      // Verificar tiempo de ejecución
+      var currentTime = new Date().getTime();
+      if (currentTime - startTime > MAX_EXECUTION_TIME) {
+        Logger.log('Tiempo límite alcanzado. Programando continuación...');
+        programarContinuacion();
+        procesoContinuado = true;
+        break;
+      }
+      
+      var nombre = hoja.getRange(i, 1).getValue();
+      var correo = hoja.getRange(i, 2).getValue();
+      var linkExistente = hoja.getRange(i, 3).getValue();
+      
+      // Saltar si ya tiene link (ya se procesó)
+      if (linkExistente && linkExistente.toString().trim() !== '') {
+        Logger.log('Fila ' + i + ': Ya procesada, saltando');
+        continue;
+      }
       
       // Validar que haya nombre
       if (!nombre || nombre.toString().trim() === '') {
-        Logger.log('Fila ' + (i + 2) + ': Sin nombre, omitida');
+        Logger.log('Fila ' + i + ': Sin nombre, omitida');
         continue;
       }
       
       try {
-        generarCertificado(nombre, correo, config);
+        var resultado = generarCertificado(nombre, correo, config, i, hoja);
         totalProcesados++;
         
         // Actualizar progreso cada 5 certificados
         if (totalProcesados % 5 === 0) {
           SpreadsheetApp.getActiveSpreadsheet().toast(
-            'Procesados ' + totalProcesados + ' de ' + datos.length,
+            'Procesados ' + totalProcesados + ' certificados',
             'Progreso',
             3
           );
         }
         
       } catch (error) {
-        Logger.log('Error en fila ' + (i + 2) + ': ' + error.message);
-        errores.push('Fila ' + (i + 2) + ' (' + nombre + '): ' + error.message);
+        Logger.log('Error en fila ' + i + ': ' + error.message);
+        errores.push('Fila ' + i + ' (' + nombre + '): ' + error.message);
+        // Marcar error en la hoja
+        hoja.getRange(i, 3).setValue('ERROR: ' + error.message);
       }
     }
-    
-    // Mostrar resultado final
-    var mensaje = 'Certificados generados exitosamente: ' + totalProcesados;
-    
-    if (errores.length > 0) {
-      mensaje += '\n\nErrores encontrados (' + errores.length + '):\n';
-      mensaje += errores.slice(0, 5).join('\n');
-      if (errores.length > 5) {
-        mensaje += '\n... y ' + (errores.length - 5) + ' más. Revisa los logs.';
-      }
-    }
-    
-    ui.alert('Proceso Completado', mensaje, ui.ButtonSet.OK);
     
     // Ocultar mensaje de progreso
     SpreadsheetApp.getActiveSpreadsheet().toast('', '', 1);
+    
+    // Mostrar resultado final solo si no se continuará automáticamente
+    if (!procesoContinuado) {
+      var mensaje = 'Certificados generados exitosamente: ' + totalProcesados;
+      
+      if (errores.length > 0) {
+        mensaje += '\n\nErrores encontrados (' + errores.length + '):\n';
+        mensaje += errores.slice(0, 5).join('\n');
+        if (errores.length > 5) {
+          mensaje += '\n... y ' + (errores.length - 5) + ' más. Revisa los logs.';
+        }
+      }
+      
+      ui.alert('Proceso Completado', mensaje, ui.ButtonSet.OK);
+    } else {
+      Logger.log('Proceso pausado. Se procesaron ' + totalProcesados + ' certificados.');
+      Logger.log('El proceso continuará automáticamente en 1 minuto.');
+    }
     
   } catch (error) {
     Logger.log('Error general: ' + error.message);
@@ -96,8 +126,10 @@ function generarTodosCertificados() {
  * @param {string} nombre - Nombre del participante
  * @param {string} correo - Correo del participante (opcional)
  * @param {Object} config - Objeto de configuración con IDs
+ * @param {number} fila - Número de fila en la hoja (para actualizar link)
+ * @param {Sheet} hoja - Objeto de la hoja activa
  */
-function generarCertificado(nombre, correo, config) {
+function generarCertificado(nombre, correo, config, fila, hoja) {
   try {
     // 1. Obtener el template original
     var templateDoc = DriveApp.getFileById(config.TEMPLATE_ID);
@@ -129,7 +161,12 @@ function generarCertificado(nombre, correo, config) {
     // 9. Guardar el PDF en la carpeta
     var pdfFile = carpetaDestino.createFile(pdfBlob);
     
-    // 10. Eliminar la copia temporal del Google Docs
+    // 10. Actualizar la celda con el link al PDF
+    if (fila && hoja) {
+      hoja.getRange(fila, 3).setValue(pdfFile.getUrl());
+    }
+    
+    // 11. Eliminar la copia temporal del Google Docs
     copiaDoc.setTrashed(true);
     
     Logger.log('Certificado generado: ' + nombreArchivo + '.pdf');
@@ -204,4 +241,71 @@ function buscarCertificado(nombreArchivo) {
     Logger.log('Error al buscar certificado: ' + error.message);
     return null;
   }
+}
+
+/**
+ * Verifica que exista la columna LINK y la crea si no existe
+ * 
+ * @param {Sheet} hoja - Hoja activa
+ */
+function verificarColumnaLink(hoja) {
+  var encabezado = hoja.getRange(1, 3).getValue();
+  
+  if (!encabezado || encabezado.toString().trim() === '') {
+    hoja.getRange(1, 3).setValue('LINK');
+    hoja.getRange(1, 3).setFontWeight('bold');
+    Logger.log('Columna LINK creada en C1');
+  }
+}
+
+/**
+ * Programa una ejecución para continuar el procesamiento
+ * Se ejecuta 1 minuto después del límite de tiempo
+ */
+function programarContinuacion() {
+  // Eliminar triggers existentes de continuación
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'generarTodosCertificados') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  
+  // Crear nuevo trigger para ejecutar en 1 minuto
+  ScriptApp.newTrigger('generarTodosCertificados')
+    .timeBased()
+    .after(1 * 60 * 1000) // 1 minuto
+    .create();
+  
+  Logger.log('Trigger de continuación creado para 1 minuto');
+  
+  // Notificar al usuario
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    'El proceso continuará automáticamente en 1 minuto. Puedes cerrar esta pestaña.',
+    'Proceso en pausa',
+    10
+  );
+}
+
+/**
+ * Limpia todos los triggers de continuación
+ * Útil si quieres cancelar el proceso automático
+ */
+function limpiarTriggersAutomaticos() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var eliminados = 0;
+  
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'generarTodosCertificados') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      eliminados++;
+    }
+  }
+  
+  Logger.log('Triggers eliminados: ' + eliminados);
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    'Se cancelaron ' + eliminados + ' ejecución(es) automática(s) pendiente(s).',
+    'Triggers Limpiados',
+    5
+  );
 }
